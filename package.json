@@ -1,0 +1,35 @@
+{
+  "name": "@mindgit/agent",
+  "version": "1.0.0",
+  "description": "MindGit Distributed Repository Sync Agent",
+  "main": "index.js",
+  "bin": {
+    "mindgit-agent": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "install:windows": "node scripts/install-windows.js",
+    "install:linux": "bash scripts/install-linux.sh",
+    "install:macos": "bash scripts/install-macos.sh"
+  },
+  "keywords": [
+    "mindgit",
+    "git",
+    "sync",
+    "agent",
+    "distributed"
+  ],
+  "author": "MindDevelopment",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.21.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "os": [
+    "win32",
+    "linux",
+    "darwin"
+  ]
+}
