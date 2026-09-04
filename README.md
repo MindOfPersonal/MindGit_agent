@@ -26,10 +26,10 @@ A lightweight Node.js agent that keeps local Git repositories in sync with GitHu
                                  │ WebSocket (WSS)
               ┌──────────────────┼──────────────────┐
               │                  │                  │
-       ┌──────┴──────┐   ┌──────┴──────┐   ┌──────┴──────┐
-       │  Node A     │   │  Node B     │   │  Node C     │
-       │ (this agent)│   │ (this agent)│   │ (this agent)│
-       └─────────────┘   └─────────────┘   └─────────────┘
+       ┌──────┴──────┐    ┌──────┴──────┐    ┌──────┴──────┐
+       │  Node A     │    │  Node B     │    │  Node C     │
+       │ (this agent)│    │ (this agent)│    │ (this agent)│
+       └─────────────┘    └─────────────┘    └─────────────┘
 ```
 
 The agent opens a persistent WebSocket connection to the coordinator, authenticates with a **node key**, and announces itself with system information (platform, architecture, hostname, Git version). The coordinator then sends task messages, and the agent executes them locally against Git and streams progress back in real time.
