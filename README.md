@@ -142,4 +142,4 @@ More detailed guides live in the [Docs](./Docs/) folder:
 
 ---
 
-*Maintained by [MindDevelopment](https://minddev.nl).*
+*Maintained by [MindDevelopment](https://minddev.nl). <3 *
