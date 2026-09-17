@@ -255,6 +255,12 @@ if not exist "%INSTALL_DIR%\.env" (
     >> "%INSTALL_DIR%\.env" echo.
     >> "%INSTALL_DIR%\.env" echo # Optional: Log level
     >> "%INSTALL_DIR%\.env" echo LOG_LEVEL=info
+    >> "%INSTALL_DIR%\.env" echo.
+    >> "%INSTALL_DIR%\.env" echo # Optional: Auto-update vanuit een publieke GitHub repo - check bij start + elk uur
+    >> "%INSTALL_DIR%\.env" echo UPDATE_REPO=MindOfPersonal/MindGit_agent
+    >> "%INSTALL_DIR%\.env" echo UPDATE_BRANCH=main
+    >> "%INSTALL_DIR%\.env" echo # UPDATE_PATH=agent
+    >> "%INSTALL_DIR%\.env" echo # UPDATE_INTERVAL=3600000
     echo [OK] .env template created at %INSTALL_DIR%\.env
 )
 

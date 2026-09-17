@@ -196,6 +196,12 @@ GIT_LONG_TIMEOUT=30000
 
 # Optional: Log level (debug, info, warn, error)
 LOG_LEVEL=info
+
+# Optional: Auto-update vanuit een publieke GitHub repo (check bij start + elk uur)
+UPDATE_REPO=MindOfPersonal/MindGit_agent
+UPDATE_BRANCH=main
+# UPDATE_PATH=agent
+# UPDATE_INTERVAL=3600000
 EOF
     print_ok ".env template created at $INSTALL_DIR/.env"
 fi

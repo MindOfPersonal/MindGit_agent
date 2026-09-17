@@ -41,6 +41,12 @@ const GIT_LONG_TIMEOUT = parseInt(process.env.GIT_LONG_TIMEOUT || '30000', 10);
 const GIT_USER_EMAIL = 'mindframework@auto.sync';
 const GIT_USER_NAME = 'MindFramework Auto-Sync';
 
+// Auto-update: agent controleert deze (publieke) GitHub repo op updates.
+const UPDATE_REPO = process.env.UPDATE_REPO || 'MindOfPersonal/MindGit_agent';
+const UPDATE_BRANCH = process.env.UPDATE_BRANCH || 'main';
+const UPDATE_PATH = process.env.UPDATE_PATH || ''; // submap in de repo (bv. 'agent')
+const UPDATE_INTERVAL = parseInt(process.env.UPDATE_INTERVAL || '3600000', 10); // 1 uur
+
 let coordinatorUrl = process.env.COORDINATOR_URL || 'http://localhost:3050';
 let nodeKey = process.env.NODE_KEY;
 let nodeId = null;
@@ -386,6 +392,79 @@ async function executeBranchesTask(payload) {
   return { success: true, branches, current };
 }
 
+async function executeRepoDataTask(payload) {
+  const { repoPath, token } = payload;
+  if (!isGitRepo(repoPath)) {
+    return { success: true, gitData: { gitStatus: '', changedFiles: '', logEntries: '' } };
+  }
+
+  const statusResult = gitSync('status --porcelain', repoPath, GIT_TIMEOUT, token);
+  const gitStatus = statusResult.success ? statusResult.stdout : '';
+
+  const logResult = gitSync('log --oneline -20', repoPath, GIT_TIMEOUT, token);
+  const logEntries = logResult.success ? logResult.stdout : '';
+
+  let changedFiles = '';
+  const head = gitSync('rev-parse HEAD', repoPath, GIT_TIMEOUT, token);
+  if (head.success && head.stdout) {
+    const parent = gitSync('rev-parse HEAD~1', repoPath, GIT_TIMEOUT, token);
+    if (parent.success && parent.stdout) {
+      const diff = gitSync(`diff --name-status ${parent.stdout}..${head.stdout}`, repoPath, GIT_TIMEOUT, token);
+      if (diff.success) changedFiles = diff.stdout;
+    }
+    if (!changedFiles) {
+      const staged = gitSync('diff --name-status --staged', repoPath, GIT_TIMEOUT, token);
+      if (staged.success) changedFiles = staged.stdout;
+      else {
+        const unstaged = gitSync('diff --name-status', repoPath, GIT_TIMEOUT, token);
+        if (unstaged.success) changedFiles = unstaged.stdout;
+      }
+    }
+  } else {
+    const cached = gitSync('diff --cached --name-status', repoPath, GIT_TIMEOUT, token);
+    if (cached.success) changedFiles = cached.stdout;
+  }
+
+  return { success: true, gitData: { gitStatus, changedFiles, logEntries } };
+}
+
+async function executeCommitTask(payload) {
+  const { repoPath, token, commit } = payload;
+  if (!commit) return { success: false, error: 'Missing commit' };
+
+  const logResult = gitSync(`log -1 --format="%H%n%an%n%ae%n%ad%n%s%n%b" ${commit}`, repoPath, GIT_TIMEOUT, token);
+  if (!logResult.success || !logResult.stdout) return { success: false, error: 'Commit not found' };
+
+  const lines = logResult.stdout.split('\n');
+  const stat = gitSync(`diff-tree --no-commit-id --name-status -r ${commit}`, repoPath, GIT_TIMEOUT, token);
+  const shortStat = gitSync(`diff-tree --no-commit-id --shortstat -r ${commit}`, repoPath, GIT_TIMEOUT, token);
+
+  return {
+    success: true,
+    commit: {
+      hash: lines[0] || '',
+      author: lines[1] || '',
+      email: lines[2] || '',
+      date: lines[3] || '',
+      subject: lines[4] || '',
+      body: lines.slice(5).join('\n').trim(),
+      files: stat.success ? stat.stdout.split('\n').filter(Boolean) : [],
+      shortStat: shortStat.success ? shortStat.stdout.trim() : '',
+    },
+  };
+}
+
+async function executeDiffTask(payload) {
+  const { repoPath, token, file } = payload;
+  if (!file) return { success: false, error: 'Missing file' };
+
+  let diff = gitSync(['diff', 'HEAD', '--', file], repoPath, GIT_TIMEOUT, token);
+  if (!diff.success || !diff.stdout) {
+    diff = gitSync(['diff', '--staged', '--', file], repoPath, GIT_TIMEOUT, token);
+  }
+  return { success: true, diff: diff.success ? diff.stdout : '' };
+}
+
 async function executeSwitchBranchTask(payload) {
   const { repoId, repoPath, token, branch } = payload;
   const result = gitSync(['checkout', branch], repoPath, GIT_LONG_TIMEOUT, token);
@@ -595,11 +674,16 @@ function handleMessage(msg) {
 async function handleTask(type, payload, correlationId) {
   // Read-only queries (status/branches/browse) mogen naast een draaiende sync
   // draaien, anders krijgt het dashboard steeds "Agent busy" terug.
-  if (type === MessageType.GET_STATUS || type === MessageType.GET_BRANCHES || type === MessageType.BROWSE_DIR) {
+  if (type === MessageType.GET_STATUS || type === MessageType.GET_BRANCHES
+      || type === MessageType.GET_REPO_DATA || type === MessageType.GET_COMMIT
+      || type === MessageType.GET_DIFF || type === MessageType.BROWSE_DIR) {
     try {
       let result;
       if (type === MessageType.GET_STATUS) result = await executeStatusTask(payload);
       else if (type === MessageType.GET_BRANCHES) result = await executeBranchesTask(payload);
+      else if (type === MessageType.GET_REPO_DATA) result = await executeRepoDataTask(payload);
+      else if (type === MessageType.GET_COMMIT) result = await executeCommitTask(payload);
+      else if (type === MessageType.GET_DIFF) result = await executeDiffTask(payload);
       else result = await executeBrowseTask(payload);
       sendMessage(MessageType.TASK_COMPLETED, { repoId: payload && payload.repoId, ...result }, correlationId);
     } catch (err) {
@@ -648,6 +732,15 @@ async function handleTask(type, payload, correlationId) {
         break;
       case MessageType.GET_BRANCHES:
         result = await executeBranchesTask(payload);
+        break;
+      case MessageType.GET_REPO_DATA:
+        result = await executeRepoDataTask(payload);
+        break;
+      case MessageType.GET_COMMIT:
+        result = await executeCommitTask(payload);
+        break;
+      case MessageType.GET_DIFF:
+        result = await executeDiffTask(payload);
         break;
       case MessageType.SWITCH_BRANCH:
         result = await executeSwitchBranchTask(payload);
@@ -785,6 +878,106 @@ function setupSignalHandlers() {
   });
 }
 
+// --- Auto-update vanuit een (publieke) GitHub repo -------------------------
+
+function getLocalVersion() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+    return pkg.version || '';
+  } catch {
+    return '';
+  }
+}
+
+function remoteRawUrl(file) {
+  const prefix = UPDATE_PATH ? UPDATE_PATH.replace(/^\/+|\/+$/g, '') + '/' : '';
+  return `https://raw.githubusercontent.com/${UPDATE_REPO}/${UPDATE_BRANCH}/${prefix}${file}`;
+}
+
+function fetchRaw(url) {
+  return new Promise((resolve) => {
+    const mod = url.startsWith('https:') ? https : http;
+    const req = mod.get(url, { timeout: 10000 }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        return resolve(null);
+      }
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => resolve(data));
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
+}
+
+function compareVersions(a, b) {
+  const pa = String(a || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x !== y) return x > y ? 1 : -1;
+  }
+  return 0;
+}
+
+async function applyUpdate(remoteVersion) {
+  const files = ['index.js', 'package.json', 'package-lock.json', 'lib/agent-protocol.js'];
+  let updated = 0;
+  for (const file of files) {
+    const content = await fetchRaw(remoteRawUrl(file));
+    if (content === null) {
+      log('warn', 'Update: bestand niet te downloaden', { file });
+      continue;
+    }
+    try {
+      const dest = path.join(__dirname, file);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      const tmp = dest + '.update.tmp';
+      fs.writeFileSync(tmp, content);
+      fs.renameSync(tmp, dest);
+      updated++;
+      log('info', 'Update: bestand bijgewerkt', { file });
+    } catch (err) {
+      log('warn', 'Update: schrijven mislukt', { file, error: err.message });
+    }
+  }
+  if (updated > 0) {
+    log('info', `Update toegepast (v${remoteVersion}), agent herstart...`);
+    // systemd/nssm/PM2 herstarten de agent automatisch (Restart=always e.d.)
+    setTimeout(() => process.exit(1), 500);
+  }
+}
+
+async function checkForUpdates() {
+  try {
+    const local = getLocalVersion();
+    const pkgRaw = await fetchRaw(remoteRawUrl('package.json'));
+    if (pkgRaw === null) {
+      log('warn', 'Update-check mislukt: remote package.json niet bereikbaar', { repo: UPDATE_REPO, branch: UPDATE_BRANCH });
+      return;
+    }
+    let remote = '';
+    try { remote = JSON.parse(pkgRaw).version || ''; } catch { /* ongeldige JSON */ }
+    log('info', 'Update-check', { local: local || 'onbekend', remote: remote || 'onbekend', repo: UPDATE_REPO });
+    if (!remote) return;
+    if (compareVersions(remote, local) > 0) {
+      log('info', 'Nieuwe versie beschikbaar', { local, remote });
+      await applyUpdate(remote);
+    }
+  } catch (err) {
+    log('warn', 'Update-check fout', { error: err.message });
+  }
+}
+
+function scheduleUpdateChecks() {
+  // Eerste check kort na opstarten (ook bij elke herstart), daarna elk uur.
+  setTimeout(checkForUpdates, 10000);
+  setInterval(checkForUpdates, UPDATE_INTERVAL);
+}
+
 function main() {
   console.log('╔══════════════════════════════════════════╗');
   console.log('║     MindGit Agent v1.0                   ║');
@@ -805,6 +998,7 @@ function main() {
 
   setupSignalHandlers();
   connect();
+  scheduleUpdateChecks();
 }
 
 main();
